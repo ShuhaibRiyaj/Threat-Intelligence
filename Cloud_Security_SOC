@@ -1,0 +1,39 @@
+# Cloud Security for SOC Analysts
+
+## AWS Key Log Source: CloudTrail
+- Logs every API call in AWS account
+- Key suspicious calls: CreateUser, AttachUserPolicy, DeleteTrail, ListBuckets
+
+## Azure Key Log Sources
+- Azure Activity Log — resource management changes
+- Azure AD Sign-in Logs — authentication
+- Microsoft Defender for Cloud — security alerts
+
+## Critical Detections
+
+### CloudTrail — Disable Logging (T1562.008) — P1 ALERT
+```spl
+index=cloudtrail eventName IN ("DeleteTrail","StopLogging","UpdateTrail")
+| table _time, userIdentity.userName, eventName, sourceIPAddress
+```
+
+### CloudTrail — IAM Privilege Escalation
+```spl
+index=cloudtrail eventName IN ("CreateUser","AttachUserPolicy","CreateAccessKey","AddUserToGroup")
+| table _time, userIdentity.userName, eventName, sourceIPAddress
+```
+
+### S3 Data Exfiltration
+```spl
+index=cloudtrail eventName="GetObject"
+| stats count by sourceIPAddress, requestParameters.bucketName
+| where count > 100
+```
+
+## MITRE ATT&CK Cloud Techniques
+| ID | Technique | Priority |
+|---|---|---|
+| T1562.008 | Disable Cloud Logs | CRITICAL |
+| T1078.004 | Valid Cloud Accounts | HIGH |
+| T1537 | Transfer Data to Cloud Account | HIGH |
+| T1535 | Unused Cloud Regions | MEDIUM |
