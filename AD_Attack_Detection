@@ -1,0 +1,90 @@
+# Active Directory Attack Detection
+
+## Overview
+Active Directory (AD) is Microsoft's identity and access management system used in every enterprise Windows network. If an attacker owns AD, they own the entire network. As a SOC analyst, detecting AD attacks early in the kill chain is critical.
+
+## Attacker Kill Chain Through AD
+```
+Phishing → Initial Access → Credential Dumping → Lateral Movement (PtH) → Kerberoasting → Domain Admin → Golden Ticket
+```
+
+---
+
+## Key Attack Techniques
+
+### 1. Pass-the-Hash (T1550.002)
+**What it is:** Attacker steals NTLM hash from memory (via Mimikatz) and authenticates without knowing the plaintext password. Windows NTLM accepts the hash directly.
+
+**Red flags:**
+- Logon Type 3 (network logon) from unexpected source IPs
+- Same account authenticating across multiple machines rapidly
+- NTLM auth where Kerberos would be expected
+
+**Detection Query — Splunk:**
+```spl
+index=wineventlog EventCode=4776
+| stats count by src_ip, user
+| where count > 5
+| sort -count
+```
+
+---
+
+### 2. Kerberoasting (T1558.003)
+**What it is:** Any domain user requests Kerberos service tickets for service accounts. Ticket is encrypted with service account password hash — taken offline and cracked with hashcat. No lockout risk.
+
+**Red flags:**
+- Event 4769 with TicketEncryptionType = 0x17 (RC4)
+- RC4 = weak = attacker preferred. Legitimate systems use AES.
+- Multiple service ticket requests from one account in short timeframe
+
+**Detection Query — Splunk:**
+```spl
+index=wineventlog EventCode=4769
+TicketEncryptionType=0x17
+| stats count by src_ip, ServiceName, Account_Name
+| where count > 10
+| sort -count
+```
+
+---
+
+### 3. Golden Ticket (T1558.001)
+**What it is:** Attacker compromises krbtgt account and forges Kerberos tickets for any user, any resource — valid up to 10 years. Persists even after all password resets. Must reset krbtgt TWICE with waiting period to invalidate.
+
+**Red flags:**
+- Tickets with abnormally long lifetimes
+- Authentication from accounts that don't exist in AD
+- Event 4769 with unusual ticket options
+
+**Detection Query — Splunk:**
+```spl
+index=wineventlog EventCode=4769
+| eval ticket_age = now() - _time
+| where ticket_age > 86400
+| table _time, user, ServiceName, ClientAddress
+```
+
+---
+
+## Event ID Cheat Sheet
+
+| Event ID | Meaning | Related Attack |
+|---|---|---|
+| 4768 | Kerberos TGT requested | Kerberoasting recon |
+| 4769 | Service ticket requested | Kerberoasting |
+| 4776 | NTLM authentication attempt | Pass-the-Hash |
+| 4624 | Successful logon | PtH (check Logon Type 3) |
+| 4625 | Failed logon | Brute force / PtH failure |
+| 4728 | User added to security group | Privilege escalation |
+| 4732 | User added to local admin group | Privilege escalation |
+| 4756 | User added to universal group | Domain escalation |
+
+---
+
+## MITRE ATT&CK Mapping
+| Technique | ID | Tactic |
+|---|---|---|
+| Pass-the-Hash | T1550.002 | Lateral Movement |
+| Kerberoasting | T1558.003 | Credential Access |
+| Golden Ticket | T1558.001 | Credential Access |
